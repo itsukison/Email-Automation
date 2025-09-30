@@ -244,7 +244,7 @@ def main():
         
         bcc_emails_input = st.text_area(
             "BCC Recipients",
-            value="michinari.nakai@bytedance.com, kentaro.koi@bytedance.com",
+            value="",
             help="Comma-separated email addresses for BCC"
         )
         
