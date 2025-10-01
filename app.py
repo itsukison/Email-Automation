@@ -260,6 +260,7 @@ def main():
     
     with col1:
         st.header("📁 File Upload")
+        st.info("📋 **Required Format**: Your Excel file must have exactly two columns: `entity name` and `email`")
         uploaded_file = st.file_uploader(
             "Upload Excel file with company data",
             type=['xlsx', 'xls'],
