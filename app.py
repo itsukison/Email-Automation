@@ -46,13 +46,13 @@ def process_excel_file(uploaded_file) -> Optional[pd.DataFrame]:
     try:
         df = pd.read_excel(uploaded_file)
         
-        # Check for required columns
-        required_columns = ['entity name', 'email']
+        # Check for required columns (only 'email' is required; 'entity name' is optional)
+        required_columns = ['email']
         missing_columns = [col for col in required_columns if col not in df.columns]
         
         if missing_columns:
             st.error(f"Missing required columns: {', '.join(missing_columns)}")
-            st.info("Required columns: 'entity name', 'email'")
+            st.info("Required column: 'email' (optional: 'entity name')")
             return None
         
         # Validate email addresses in the file
@@ -78,14 +78,87 @@ def generate_email_body(template: str, company_name: str) -> str:
     """Generate personalized email body"""
     return template.replace("{company_name}", company_name)
 
+def convert_template_to_html(template: str, company_name: Optional[str]) -> str:
+    """Convert plain text template to HTML with formatting support"""
+    # Replace company name placeholder (robust to None/NaN/non-string)
+    if company_name is None:
+        company_name_str = ""
+    else:
+        try:
+            import pandas as _pd  # local import to use isna without polluting namespace
+            if isinstance(company_name, float) and _pd.isna(company_name):
+                company_name_str = ""
+            else:
+                company_name_str = str(company_name)
+        except Exception:
+            company_name_str = str(company_name) if not isinstance(company_name, float) else ""
+
+    html_content = template.replace("{company_name}", company_name_str)
+    
+    # Apply HTML formatting for bold and underlined text first
+    # Bold text: **text** -> <strong>text</strong>
+    import re
+    html_content = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', html_content)
+    
+    # Underlined text: __text__ -> <u>text</u>
+    html_content = re.sub(r'__(.*?)__', r'<u>\1</u>', html_content)
+    
+    # Convert bullet points to HTML lists
+    lines = html_content.split('\n')
+    html_lines = []
+    in_list = False
+    
+    for line in lines:
+        # Check if line starts with bullet point
+        if line.strip().startswith('- '):
+            if not in_list:
+                html_lines.append('<ul>')
+                in_list = True
+            # Extract text after the bullet and convert any remaining formatting
+            bullet_text = line.strip()[2:]  # Remove '- '
+            html_lines.append(f'<li>{bullet_text}</li>')
+        else:
+            if in_list:
+                html_lines.append('</ul>')
+                in_list = False
+            # Convert regular lines to HTML with line breaks
+            if line.strip():
+                html_lines.append(f'{line}<br>')
+            else:
+                html_lines.append('<br>')
+    
+    # Close any remaining list
+    if in_list:
+        html_lines.append('</ul>')
+    
+    html_content = '\n'.join(html_lines)
+    
+    # Wrap in basic HTML structure
+    html_email = f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+    </head>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        {html_content}
+    </body>
+    </html>
+    """
+    
+    return html_email
+
 def send_emails(df: pd.DataFrame, config: Dict, template: str) -> List[Dict]:
     """Send emails to all recipients with progress tracking"""
     results = []
     
     try:
-        # Setup SMTP connection
+        # Setup SMTP connection with debug info
+        st.info(f"Connecting to {config['smtp_server']}:{config['smtp_port']}...")
         server = smtplib.SMTP_SSL(config['smtp_server'], config['smtp_port'])
+        server.set_debuglevel(1)  # Enable debug output
+        st.info("Attempting to login...")
         server.login(config['sender_email'], config['sender_password'])
+        st.success("SMTP connection successful!")
         
         # Create progress bar
         progress_bar = st.progress(0)
@@ -94,20 +167,22 @@ def send_emails(df: pd.DataFrame, config: Dict, template: str) -> List[Dict]:
         total_emails = len(df)
         
         for idx, row in df.iterrows():
-            company_name = row['entity name']
+            # 'entity name' is optional; coerce missing/NaN to empty string
+            company_name = row['entity name'] if 'entity name' in df.columns else ""
             recipient_email = row['email']
             
             # Update progress
             progress = (idx + 1) / total_emails
             progress_bar.progress(progress)
-            status_text.text(f"Sending to {company_name} ({idx + 1}/{total_emails})")
+            label_name = company_name if (isinstance(company_name, str) and company_name.strip()) else recipient_email
+            status_text.text(f"Sending to {label_name} ({idx + 1}/{total_emails})")
             
             try:
-                # Generate personalized email content
-                email_body = generate_email_body(template, company_name)
+                # Generate personalized email content (HTML format)
+                email_body = convert_template_to_html(template, company_name)
                 
-                # Create email message
-                msg = MIMEText(email_body, 'plain', 'utf-8')
+                # Create email message (HTML format)
+                msg = MIMEText(email_body, 'html', 'utf-8')
                 msg['Subject'] = Header(config['subject'], 'utf-8')
                 msg['From'] = config['sender_email']
                 msg['To'] = recipient_email
@@ -292,11 +367,11 @@ TikTok Japan EC事業（ByteDance株式会社）の孫と申します。
 
 既にTikTok Shopにご出店いただいておりましたら、重ねてのご案内となり失礼いたします。 まだご参加でない場合、ぜひこの機会にご検討いただきたく、ご連絡を差し上げました。
 
-TikTok Shopは従来の「検索型EC」とは異なり、動画とレコメンドを掛け合わせた 「発見型EC（ディスカバリーコマース）」 を実現します。 ユーザーは検索せずとも興味に合った商品に出会い、その場で購入まで完結できる新しい購買体験を楽しんでいます。
+TikTok Shopは従来の「検索型EC」とは異なり、動画とレコメンドを掛け合わせた **「発見型EC（ディスカバリーコマース）」** を実現します。 ユーザーは検索せずとも興味に合った商品に出会い、その場で購入まで完結できる新しい購買体験を楽しんでいます。
 
 出店いただくことで、
 - フォロワー数に関わらず、バズを通じた新規顧客への大規模なリーチ
-- 動画やライブ配信からシームレスに購入できる 高いCVR（購入転換率）
+- 動画やライブ配信からシームレスに購入できる **高いCVR（購入転換率）**
 - 低コスト・低リスクでの新しい販路開拓
  
 といったメリットをご享受いただけます。
@@ -304,7 +379,7 @@ TikTok Shopは従来の「検索型EC」とは異なり、動画とレコメン�
 
 まずは下記のアンケートにご回答いただき、セミナーにご参加いただければ幸いです。
 
-▼アンケートリンク
+▼__アンケートリンク__
 https://bytedance.sg.larkoffice.com/share/base/form/shrlgWrMb9JHyZiMLsLdCaBs7Cd
 
 ご検討のほど、何卒よろしくお願いいたします。
@@ -320,7 +395,7 @@ https://bytedance.sg.larkoffice.com/share/base/form/shrlgWrMb9JHyZiMLsLdCaBs7Cd
             "Email Template",
             value=default_template,
             height=400,
-            help="Use {company_name} as placeholder for company name"
+            help="Use {company_name} as placeholder for company name. Formatting: **bold text** for bold, __underlined text__ for underlined, - text for bullet points"
         )
         
 
@@ -391,6 +466,8 @@ https://bytedance.sg.larkoffice.com/share/base/form/shrlgWrMb9JHyZiMLsLdCaBs7Cd
     st.markdown("---")
     st.markdown("💡 **Tips:**")
     st.markdown("- Use `{company_name}` in your template to personalize emails")
+    st.markdown("- Use `**bold text**` for bold formatting and `__underlined text__` for underlined text")
+    st.markdown("- Use `- text` for bullet points (proper HTML lists will be generated)")
     st.markdown("- Test with a small file first before sending to large lists")
     st.markdown("- Keep your SMTP credentials secure")
 
